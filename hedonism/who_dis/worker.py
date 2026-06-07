@@ -1,17 +1,19 @@
 from celery import Celery
-from PIL import Image
-from pillow_heif import register_heif_opener
 from deepface import DeepFace
-import tempfile
-import urllib.request
 import psycopg2
 from sklearn.cluster import DBSCAN
 import numpy as np
 import json
-from itertools import groupby
+from gql import Client, gql
+from gql.transport.aiohttp import AIOHTTPTransport
 
-# Register the plugin to enable HEIF support in Pillow
-register_heif_opener()
+API_KEY = "your_api_key_here"
+
+# Select your transport with a defined url endpoint
+GRAPH_TRANSPORT = AIOHTTPTransport(url="http://localhost:5000/graphql", headers={"Authorization": f"Bearer {API_KEY}"})
+
+# Create a GraphQL client using the defined transport
+GRAPH_CLIENT = Client(transport=GRAPH_TRANSPORT)
 
 app = Celery('hedonism_who_dis', broker='redis://default@127.0.0.1:6379/0', result_backend='redis://default@127.0.0.1:6379/0')
 
@@ -42,42 +44,58 @@ def cluster_faces(date_grouping):
     return list(update_data)
 
 @app.task
-def download_convert_and_extract_facial_data(heif_url):
-    print(f"heif_url -> {heif_url}")
-    with tempfile.NamedTemporaryFile(suffix=".hif") as temp_file:
-        urllib.request.urlretrieve(heif_url, temp_file.name)
-        temp_file.seek(0)
-        convert_and_extract_facial_data(temp_file)
-        return convert_and_extract_facial_data(temp_file)
+def extract_facial_data(photo_id):
+    # Provide a GraphQL query
+    query = gql(
+        """
+        query FacialRecognitionPhoto($photoId: ID!) {
+          photo(id: $photoId) {
+            id
+            facialRecognitionUrl
+          }
+        }
+    """
+    )
 
-@app.task
-def convert_and_extract_facial_data(heif_data):
-    image = Image.open(heif_data)
+    query.variable_values = {"photoId": photo_id}
 
-    # Convert image mode to RGB (required for saving as JPEG)
-    rgb_image = image.convert("RGB")
+    result = GRAPH_CLIENT.execute(query)
 
-    with tempfile.TemporaryFile() as temp_file:
-        # Save as a JPEG file
-        rgb_image.save(temp_file, "JPEG", quality=95)
-        return extract_facial_data(temp_file)
+    print(f"Source Photo => {result}")
 
-@app.task
-def download_extract_facial_data(jpeg_url):
-    pass
-
-@app.task
-def extract_facial_data(jpeg_path):
     # Extract embeddings for all faces found in the image
     try:
         embedding_objects = DeepFace.represent(
-            img_path=jpeg_path,
+            img_path=result['photo']['facialRecognitionUrl'],
             model_name="ArcFace",         # Alternatives: "VGG-Face", "ArcFace", "OpenFace"
             detector_backend="retinaface",
             enforce_detection=True
         )
+        print(f"Extracted {embedding_objects}")
 
-        return embedding_objects
+        embedding_update = gql(
+            """
+            mutation FacialRecognitionPhoto($photoId: ID!, $faceObjects: [FaceDataInput!]!) {
+              photoFaceUpdate(faces: $faceObjects, id: $photoId) {
+                photo {
+                  id
+                }
+              }
+            }
+        """
+        )
+
+        mapped_faces = [
+            {
+                "embedding": face['embedding'],
+                "facialArea": face['facial_area'],
+                "faceConfidence": face['face_confidence']
+            } for face in embedding_objects
+        ]
+
+        embedding_update.variable_values = {"photoId": photo_id, "faceObjects": mapped_faces}
+        result = GRAPH_CLIENT.execute(embedding_update)
+        print(f"Result of Mutation => {result}")
 
     except Exception as e:
         print(f"An error occurred: {e}")
