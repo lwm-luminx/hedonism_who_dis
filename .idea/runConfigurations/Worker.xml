@@ -2,6 +2,7 @@
   <configuration default="false" name="Worker" type="Python.Celery" factoryName="Python.Celery.App">
     <option name="app" value="hedonism.who_dis.worker.app" />
     <module name="hedonism-who-dis" />
+    <option name="scriptOptions" value="--loglevel INFO --pool=threads" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
