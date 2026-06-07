@@ -1,9 +1,5 @@
 from celery import Celery
 from deepface import DeepFace
-import psycopg2
-from sklearn.cluster import DBSCAN
-import numpy as np
-import json
 from gql import Client, gql
 from gql.transport.aiohttp import AIOHTTPTransport
 from transformers import pipeline
@@ -79,34 +75,7 @@ def caption_image(photo_id):
     )
 
     caption_update.variable_values = { "photoId": photo_id, "caption": caption }
-    result = graph_client().execute(caption_update)
-
-
-@app.task
-def cluster_faces(date_grouping):
-    # 1. Connect to PostgreSQL and fetch embeddings
-    with psycopg2.connect("dbname=hedonism_bot_development host=localhost port=5432") as conn:
-        with conn.cursor() as cur:
-            if date_grouping is None:
-                cur.execute("SELECT photo_people.id, arc_face_embedding FROM photo_people WHERE photo_people.arc_face_embedding IS NOT NULL")
-            else:
-                cur.execute("SELECT photo_people.id, arc_face_embedding FROM photo_people INNER JOIN photos ON photo_people.photo_id = photos.id WHERE photos.folder_date = %s", (date_grouping,))
-            data = cur.fetchall()
-
-            # 2. Separate IDs and Vectors
-            ids = [row[0] for row in data]
-            embeddings = np.array([json.loads(row[1]) for row in data])
-
-            # 3. Apply DBSCAN
-            # eps: maximum distance between two samples for them to be considered as in the same neighborhood
-            # min_samples: number of samples in a neighborhood for a point to be considered as a core point
-            clustering = DBSCAN(eps=0.3, min_samples=1, metric='cosine').fit(embeddings)
-            labels = clustering.labels_
-
-            # 4. Update the database with cluster assignments
-            update_data = [ [ int(label), id_] for label, id_ in zip(labels, ids)   ]
-
-    return list(update_data)
+    graph_client().execute(caption_update)
 
 @app.task
 def extract_facial_data(photo_id):
@@ -116,7 +85,9 @@ def extract_facial_data(photo_id):
     try:
         embedding_objects = DeepFace.represent(
             img_path=photo_url,
+            expand_percentage=20,
             enforce_detection=False,
+            normalization="ArcFace",
             model_name="ArcFace",         # Alternatives: "VGG-Face", "ArcFace", "OpenFace"
             detector_backend="retinaface"
         )
@@ -140,6 +111,7 @@ def extract_facial_data(photo_id):
                 "facialArea": face['facial_area'],
                 "faceConfidence": face['face_confidence']
             } for face in embedding_objects
+            if face['face_confidence'] > 0.9
         ]
 
         embedding_update.variable_values = {"photoId": photo_id, "faceObjects": mapped_faces}
