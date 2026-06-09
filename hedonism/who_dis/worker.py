@@ -1,3 +1,4 @@
+import celery
 from celery import Celery
 from deepface import DeepFace
 from gql import Client, gql
@@ -27,9 +28,11 @@ def get_photo_url(photo_id):
     query = gql(
         """
         query FacialRecognitionPhoto($photoId: ID!) {
-          photo(id: $photoId) {
+          node(id: $photoId) {
             id
-            facialRecognitionUrl
+            ... on Photo {
+              facialRecognitionUrl
+            }
           }
         }
     """
@@ -38,9 +41,9 @@ def get_photo_url(photo_id):
     query.variable_values = {"photoId": photo_id}
 
     result = graph_client().execute(query)
-    return result['photo']['facialRecognitionUrl']
+    return result['node']['facialRecognitionUrl']
 
-@app.task
+@app.task()
 def caption_image(photo_id):
     photo_url = get_photo_url(photo_id)
 
@@ -54,13 +57,29 @@ def caption_image(photo_id):
             "role": "user",
             "content": [
                 {"type": "image", "url": photo_url},
-                {"type": "text", "text": "Describe the contents of this image in a professional way optimized for search"},
+                {"type": "text", "text": "Create a concise caption for the visually impaired."},
             ],
         },
     ]
-    caption_result = pipe(text=captioning_context)
-    caption = caption_result[0]['generated_text'][2]['content']
+
+    caption = pipe(text=captioning_context, max_new_tokens=20, return_full_text=False)[0]['generated_text']
     print(f"Generated caption: {caption}")
+
+    description_context = [
+        {
+            "role": "system",
+            "content": "You are a helpful image captioner.",
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "url": photo_url},
+                {"type": "text", "text": "Describe the image in a professional way optimized for search"},
+            ],
+        },
+    ]
+    description = pipe(text=description_context, return_full_text=False)[0]['generated_text']
+    print(f"Generated caption: {description}")
 
     caption_update = gql(
     """
@@ -77,7 +96,7 @@ def caption_image(photo_id):
     caption_update.variable_values = { "photoId": photo_id, "caption": caption }
     graph_client().execute(caption_update)
 
-@app.task
+@app.task()
 def extract_facial_data(photo_id):
     photo_url = get_photo_url(photo_id)
 
