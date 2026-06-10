@@ -83,8 +83,8 @@ def caption_image(photo_id):
 
     caption_update = gql(
     """
-    mutation CaptionPhoto($photoId: ID!, $caption: String!) {
-      photoCaptionUpdate(id: $photoId, caption: $caption) {
+    mutation CaptionPhoto($photoId: ID!, $caption: String!, $description: String!) {
+      photoCaptionUpdate(id: $photoId, caption: $caption, description: $description) {
         photo {
           id
         }
@@ -93,7 +93,7 @@ def caption_image(photo_id):
     """
     )
 
-    caption_update.variable_values = { "photoId": photo_id, "caption": caption }
+    caption_update.variable_values = { "photoId": photo_id, "caption": caption, description: description }
     graph_client().execute(caption_update)
 
 @app.task()
