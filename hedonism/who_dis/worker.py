@@ -63,6 +63,8 @@ def caption_image(photo_id):
     ]
 
     caption = pipe(text=captioning_context, max_new_tokens=20, return_full_text=False)[0]['generated_text']
+    if caption is None:
+        caption = "Unable to generate caption"
     print(f"Generated caption: {caption}")
 
     description_context = [
@@ -79,6 +81,8 @@ def caption_image(photo_id):
         },
     ]
     description = pipe(text=description_context, return_full_text=False)[0]['generated_text']
+    if description is None:
+        description = "Unable to generate description"
     print(f"Generated caption: {description}")
 
     caption_update = gql(
