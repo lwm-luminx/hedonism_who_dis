@@ -46,6 +46,8 @@ def get_photo_url(photo_id):
 @app.task()
 def caption_image(photo_id):
     photo_url = get_photo_url(photo_id)
+    if not photo_url:
+        return
 
     # Build the conversation
     captioning_context = [
@@ -97,12 +99,14 @@ def caption_image(photo_id):
     """
     )
 
-    caption_update.variable_values = { "photoId": photo_id, "caption": caption, description: description }
+    caption_update.variable_values = { "photoId": photo_id, "caption": caption, "description": description }
     graph_client().execute(caption_update)
 
 @app.task()
 def extract_facial_data(photo_id):
     photo_url = get_photo_url(photo_id)
+    if not photo_url:
+        return
 
     # Extract embeddings for all faces found in the image
     try:
